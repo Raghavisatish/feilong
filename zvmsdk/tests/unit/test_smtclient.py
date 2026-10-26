@@ -2120,7 +2120,27 @@ class SDKSMTClientTestCases(base.SDKTestCase):
             "--operands",
             "-k grant_userid=FakeID",
             "-k switch_name=FakeVS",
-            "-k user_vlan_id=FakeVLAN",
+            "-k user_vlan_id='FakeVLAN'",
+            "-k persist=YES"))
+
+        self._smtclient.set_vswitch_port_vlan_id(vswitch_name,
+                                                  userid, vlan_id)
+        request.assert_called_once_with(rd)
+
+    @mock.patch.object(zvmutils, 'get_smt_userid')
+    @mock.patch.object(smtclient.SMTClient, '_request')
+    def test_set_vswitch_port_vlan_id_multiple(self, request, get_smt_userid):
+        get_smt_userid.return_value = "SMTUSER"
+        request.return_value = {'overallRC': 0}
+        userid = 'FakeID'
+        vswitch_name = 'FakeVS'
+        vlan_id = '10 20'
+        rd = ' '.join((
+            "SMAPI SMTUSER API Virtual_Network_Vswitch_Set_Extended",
+            "--operands",
+            "-k grant_userid=FakeID",
+            "-k switch_name=FakeVS",
+            "-k user_vlan_id='10 20'",
             "-k persist=YES"))
 
         self._smtclient.set_vswitch_port_vlan_id(vswitch_name,
@@ -5786,6 +5806,38 @@ class SDKSMTClientTestCases(base.SDKTestCase):
         self.assertIn('Already updated: guests table, switch table, '
                       'fcp table, authorization on vswitch VSW1', msg)
         # new userid is revoked on failure to prevent dual authorization
+        mock_revoke.assert_called_once_with('VSW1', 'NEWVM')
+
+    @mock.patch.object(smtclient.SMTClient, 'revoke_user_from_vswitch')
+    @mock.patch.object(smtclient.SMTClient, 'grant_user_to_vswitch')
+    @mock.patch.object(smtclient.SMTClient, '_request')
+    @mock.patch('zvmsdk.database.GuestDbOperator.guest_rename_userid')
+    @mock.patch('zvmsdk.database.NetworkDbOperator.'
+                'switch_select_record_for_userid')
+    @mock.patch('zvmsdk.database.NetworkDbOperator.switch_rename_userid')
+    @mock.patch('zvmsdk.database.FCPDbOperator.fcp_rename_assigner_id')
+    def test_image_rename_dm_vlan_ids_failed_and_revoke_failed(
+            self, mock_fcp_rename, mock_switch_rename, mock_switch_select,
+            mock_guest_rename, mock_req, mock_grant, mock_revoke,
+            mock_query, mock_set_vlan):
+        mock_req.return_value = {'response': ['Done']}
+        mock_switch_select.return_value = [
+            {'userid': 'OLDVM', 'interface': '1000', 'switch': 'VSW1'}]
+        mock_query.return_value = {'authorized_users': {
+            'OLDVM': {'vlan_ids': ['10']}}}
+        mock_set_vlan.side_effect = exception.SDKSMTRequestFailed(
+            {'rc': 1, 'rs': 1}, 'vlan failed')
+        mock_revoke.side_effect = exception.SDKSMTRequestFailed(
+            {'rc': 2, 'rs': 2}, 'revoke failed')
+
+        with self.assertRaises(exception.SDKGuestOperationError) as cm:
+            self._smtclient.image_rename_dm('OLDVM', 'NEWVM')
+        msg = cm.exception.format_message()
+        self.assertIn('VLAN ids on vswitch VSW1', msg)
+        self.assertIn('vlan failed', msg)
+        self.assertIn("cleanup failed to revoke 'NEWVM' authorization from "
+                      "vswitch VSW1", msg)
+        self.assertIn('revoke failed', msg)
         mock_revoke.assert_called_once_with('VSW1', 'NEWVM')
 
     def test_get_user_vlan_ids(self):

@@ -1842,7 +1842,7 @@ class SMTClient(object):
             "--operands",
             "-k grant_userid=%s" % userid,
             "-k switch_name=%s" % vswitch_name,
-            "-k user_vlan_id=%s" % vlan_id,
+            "-k user_vlan_id='%s'" % vlan_id,
             "-k persist=YES"))
 
         try:
@@ -4718,12 +4718,19 @@ class SMTClient(object):
                     self.set_vswitch_port_vlan_id(vswitch, new_userid,
                                                   ' '.join(vlan_ids))
                 except exception.SDKBaseException as err:
+                    msg = err.format_message()
                     # Clean up newly granted user authorization to prevent dual authorization
                     try:
                         self.revoke_user_from_vswitch(vswitch, new_userid)
-                    except Exception:
-                        pass
-                    msg = err.format_message()
+                    except Exception as revoke_err:
+                        revoke_msg = getattr(revoke_err, 'format_message',
+                                             lambda: six.text_type(revoke_err))()
+                        LOG.warning("Failed to revoke authorization for '%s' from "
+                                    "vswitch %s during cleanup: %s" %
+                                    (new_userid, vswitch, revoke_msg))
+                        msg += (", and cleanup failed to revoke '%s' "
+                                "authorization from vswitch %s: %s" %
+                                (new_userid, vswitch, revoke_msg))
                     LOG.error("Guest '%s' was renamed to '%s' in the z/VM "
                               "directory, but updating the %s failed: %s. "
                               "Already updated: %s. Manual correction is "

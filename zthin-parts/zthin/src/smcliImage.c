@@ -4485,7 +4485,7 @@ int imageRenameDM(int argC, char* argV[], struct _vmApiInternalContext* vmapiCon
 
     opterr = 0;
     const char * argumentsRequired = "Tk";
-    char tempStr[1];
+    char tempStr[2];
     char strMsg[250];
     const char * newImageNamePrefix = "new_image_name=";
 
